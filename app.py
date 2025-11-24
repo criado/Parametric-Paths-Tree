@@ -235,8 +235,7 @@ def compute_trajectories(
     in_paths_list: list[list[np.ndarray]] = [[] for _ in range(n)]
     t_values: list[float] = []
 
-    t_start = min(t_max, 0.1)
-    for t in np.linspace(t_start, t_max, steps):
+    for t in np.linspace(0.0, t_max, steps):
         t_values.append(t)
         out_dists, in_dists = engine.trajectories(t)
         for i in range(n):
@@ -382,7 +381,7 @@ def plot_trajectories(
     axis_dirs: np.ndarray,
     show_out: bool,
     show_in: bool,
-    labels_3d: list[tuple[np.ndarray, str, str]],
+    labels_3d: list[tuple[np.ndarray, str]],
 ) -> go.Figure:
     out_color = "#4C78A8"  # blue for out-distances
     in_color = "#F28E2B"  # orange for in-distances
@@ -401,11 +400,11 @@ def plot_trajectories(
                     y=path[:, 1],
                     z=path[:, 2],
                     mode="lines+markers",
-                    name=f"Out-distance {idx}",
+                    name="out[i]= (max(x_j-x_i) | j=0..3)" if idx == 0 else None,
                     line=dict(color=out_color, width=4),
                     marker=dict(size=4, color=out_color),
                     hoverinfo="skip",
-                    showlegend=False,
+                    showlegend=(idx == 0),
                 )
             )
 
@@ -420,11 +419,11 @@ def plot_trajectories(
                     y=path[:, 1],
                     z=path[:, 2],
                     mode="lines+markers",
-                    name=f"In-distance {idx}",
+                    name="in[j]= (max(x_j-x_i) | i=0..3)" if idx == 0 else None,
                     line=dict(color=in_color, width=4, dash="dash"),
                     marker=dict(size=4, color=in_color),
                     hoverinfo="skip",
-                    showlegend=False,
+                    showlegend=(idx == 0),
                 )
             )
 
@@ -473,28 +472,32 @@ def plot_trajectories(
     in_points = [(p, txt) for p, txt, kind in labels_3d if kind == "in"]
     out_points = [(p, txt) for p, txt, kind in labels_3d if kind == "out"]
 
-    def add_group(points, color, name, show_legend=True, symbol=None, visible=True):
-        if not points or not visible:
-            return
-        xs, ys, zs, texts = zip(*[(p[0], p[1], p[2], txt) for p, txt in points])
+    for pts, color, shift_dir in (
+        (out_points, out_color, np.array([1.0, 0.0, 0.0])),
+        (in_points, in_color, np.array([-1.0, 0.0, 0.0])),
+    ):
+        if not pts:
+            continue
+        xs, ys, zs, texts = [], [], [], []
+        for p, txt in pts:
+            offset = shift_dir * 0.05
+            xs.append(p[0] + offset[0])
+            ys.append(p[1] + offset[1])
+            zs.append(p[2] + offset[2])
+            texts.append(txt)
         fig.add_trace(
             go.Scatter3d(
-                x=list(xs),
-                y=list(ys),
-                z=list(zs),
-                mode="markers+text",
-                name=name,
-                marker=dict(size=12, color=color, opacity=0.95, symbol=symbol or "circle"),
-                text=list(texts),
-                textposition="middle center",
-                textfont=dict(color="white", size=12),
+                x=xs,
+                y=ys,
+                z=zs,
+                mode="text",
+                text=texts,
+                textfont=dict(color=color, size=12),
+                textposition="top center",
                 hoverinfo="skip",
-                showlegend=show_legend,
+                showlegend=False,
             )
         )
-
-    add_group(out_points, out_color, "blue: out[i]=(max(x_j - x_i) | j=0..3)", visible=show_out)
-    add_group(in_points, in_color, "orange: in[j]= (max(x_j - x_i) | i=0..3)", visible=show_in)
 
     if all_pts:
         pts = np.vstack(all_pts)
@@ -610,7 +613,7 @@ axis_dirs = np.vstack(canonical_dirs)
 
 poly_overlays: list[tuple[str, np.ndarray, list[tuple[int, int]]]] = []
 poly_debug_items: list[tuple[str, dict]] = []
-label_points: list[tuple[np.ndarray, str, str, str]] = []
+label_points: list[tuple[np.ndarray, str, str]] = []
 for label, geom in poly_info:
     if geom is None:
         continue
