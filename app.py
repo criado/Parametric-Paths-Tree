@@ -490,15 +490,16 @@ def plot_trajectories(
 
     fig.update_layout(
         scene=dict(
-            xaxis_title="e₁",
-            yaxis_title="e₂",
-            zaxis_title="e₃",
+            xaxis_title="",
+            yaxis_title="",
+            zaxis_title="",
             aspectmode="manual",
             aspectratio=dict(x=1, y=1, z=1),
+            dragmode="orbit",
             camera=dict(projection=dict(type="orthographic")),
-            xaxis=dict(showgrid=False, showbackground=False, zeroline=False, range=xr),
-            yaxis=dict(showgrid=False, showbackground=False, zeroline=False, range=yr),
-            zaxis=dict(showgrid=False, showbackground=False, zeroline=False, range=zr),
+            xaxis=dict(showgrid=False, showbackground=False, zeroline=False, range=xr, showticklabels=False, ticks=""),
+            yaxis=dict(showgrid=False, showbackground=False, zeroline=False, range=yr, showticklabels=False, ticks=""),
+            zaxis=dict(showgrid=False, showbackground=False, zeroline=False, range=zr, showticklabels=False, ticks=""),
         ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
         margin=dict(l=0, r=0, b=0, t=30),
