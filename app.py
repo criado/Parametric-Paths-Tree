@@ -49,6 +49,9 @@ class ParametricPaths:
         n = weights.shape[0]
         self.n = n
         self.matrices: list[tuple[Fraction, list[list[Fraction]], list[list[Fraction]]]] = []
+        self.freeze_times = [
+            [Fraction(0) if i == j else None for j in range(n)] for i in range(n)
+        ]
         weights_frac = [[Fraction(weights[i][j]) for j in range(n)] for i in range(n)]
 
         t = Fraction(0)
@@ -70,6 +73,10 @@ class ParametricPaths:
             for i in range(n):
                 for j in range(n):
                     if mat[i][j] + mat[j][i] == 0:
+                        if self.freeze_times[i][j] is None:
+                            self.freeze_times[i][j] = t
+                        if self.freeze_times[j][i] is None:
+                            self.freeze_times[j][i] = t
                         dmat[i][j] = Fraction(0)
                         dmat[j][i] = Fraction(0)
 
@@ -94,6 +101,14 @@ class ParametricPaths:
 
     def max_t(self) -> float:
         return float(self.matrices[-1][0])
+
+    def freeze_time_matrix(self) -> np.ndarray:
+        out = np.full((self.n, self.n), np.nan, dtype=float)
+        for i in range(self.n):
+            for j in range(self.n):
+                if self.freeze_times[i][j] is not None:
+                    out[i, j] = float(self.freeze_times[i][j])
+        return out
 
     def trajectories(self, t: float) -> tuple[np.ndarray, np.ndarray]:
         t_frac = Fraction(t)
@@ -187,6 +202,7 @@ def compute_trajectories(
     np.ndarray,
     np.ndarray,
     np.ndarray,
+    list[str],
     list[list[list[str]]],
 ]:
     """
@@ -195,27 +211,39 @@ def compute_trajectories(
 
     n = 4
     dist0, _ = floyd_warshall(base_weights)
-    freeze_times = np.full((n, n), np.nan, dtype=float)
     engine = ParametricPaths(base_weights)
     t_max = engine.max_t()
+    freeze_times = engine.freeze_time_matrix()
 
     blue_paths: list[list[np.ndarray]] = [[] for _ in range(n)]
     red_paths: list[list[np.ndarray]] = [[] for _ in range(n)]
     t_values: list[float] = []
-    symbolic_mats: list[list[list[str]]] = []
 
     for t in np.linspace(0.0, t_max, steps):
         t_values.append(t)
         out_dists, in_dists = engine.trajectories(t)
-        symbolic_mats.append(engine.symbolic_matrix(t))
         for i in range(n):
             blue_paths[i].append(project_point(out_dists[i, :]))
             red_paths[i].append(project_point(in_dists[i, :]))
 
+    transition_ts = [entry[0] for entry in engine.matrices]
+    interval_labels: list[str] = []
+    interval_symbolic: list[list[list[str]]] = []
+    for idx, start in enumerate(transition_ts):
+        end = transition_ts[idx + 1] if idx + 1 < len(transition_ts) else None
+        start_str = ParametricPaths._fmt_fraction(start)
+        if end is None:
+            label = f"{start_str} <= t"
+        else:
+            end_str = ParametricPaths._fmt_fraction(end)
+            label = f"{start_str} <= t <= {end_str}"
+        interval_labels.append(label)
+        interval_symbolic.append(engine.symbolic_matrix(float(start)))
+
     t_arr = np.array(t_values, dtype=float)
     blue_arrays = [np.vstack(path) if path else np.empty((0, 3)) for path in blue_paths]
     red_arrays = [np.vstack(path) if path else np.empty((0, 3)) for path in red_paths]
-    return blue_arrays, red_arrays, dist0, freeze_times, t_arr, symbolic_mats
+    return blue_arrays, red_arrays, dist0, freeze_times, t_arr, interval_labels, interval_symbolic
 
 
 def build_halfspaces(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -481,7 +509,7 @@ with st.sidebar:
     show_in = st.checkbox("Show in-trajectories", value=True)
 
 
-blue_paths, red_paths, dist0, freeze_times, t_samples, symbolic_mats = compute_trajectories(
+blue_paths, red_paths, dist0, freeze_times, t_samples, interval_labels, interval_symbolic = compute_trajectories(
     weights, steps
 )
 
@@ -504,12 +532,10 @@ for k in range(4):
     canonical_dirs.append(project_point(centered))
 axis_dirs = np.vstack(canonical_dirs)
 
-status_col, meta_col = st.columns([2, 1])
+status_col, meta_col = st.columns([3, 1])
 with status_col:
     if neg_cycle_at_zero:
         st.error("The graph already has a negative cycle at t = 0. The polytope is empty.")
-    else:
-        st.success("Trajectories computed with progressive freezing of edges on ~zero cycles.")
 
     fig = plot_trajectories(
         blue_paths,
@@ -521,14 +547,20 @@ with status_col:
         show_out,
         show_in,
     )
-    st.plotly_chart(fig, config={"displayModeBar": False}, height=650)
+    st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True, height=800)
 
 with meta_col:
-    st.subheader("Current distances (t=0)")
-    st.dataframe(
-        pd.DataFrame(dist0, index=["v0", "v1", "v2", "v3"], columns=["v0", "v1", "v2", "v3"]),
-        width="stretch",
-    )
+    st.subheader("Parametric distances")
+    if len(interval_labels) > 0:
+        seg_choice = st.selectbox(
+            "Interval",
+            options=list(range(len(interval_labels))),
+            format_func=lambda idx: interval_labels[idx],
+        )
+        st.dataframe(
+            pd.DataFrame(interval_symbolic[seg_choice], index=["v0", "v1", "v2", "v3"], columns=["v0", "v1", "v2", "v3"]),
+            width="stretch",
+        )
 
     st.markdown("---")
     if poly_geom:
@@ -549,18 +581,6 @@ with meta_col:
     st.subheader("Freeze times")
     ft_df = pd.DataFrame(freeze_times, columns=["v0", "v1", "v2", "v3"], index=["v0", "v1", "v2", "v3"])
     st.dataframe(ft_df, width="stretch")
-
-    st.subheader("Distances (symbolic)")
-    if len(symbolic_mats) > 0:
-        t_choice = st.select_slider(
-            "Select t",
-            options=list(range(len(symbolic_mats))),
-            format_func=lambda idx: f"t = {t_samples[idx]:.4f}",
-        )
-        st.dataframe(
-            pd.DataFrame(symbolic_mats[t_choice], index=["v0", "v1", "v2", "v3"], columns=["v0", "v1", "v2", "v3"]),
-            width="stretch",
-        )
 
     st.subheader("Notes")
     st.markdown(
