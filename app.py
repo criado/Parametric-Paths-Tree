@@ -122,6 +122,8 @@ class ParametricPaths:
                     out[i, j] = self._fmt_fraction(self.freeze_times[i][j])
         return out
 
+    # This returns first outdistances (blue, out[i]=max(x_j-x_i))
+    # then the indistances (orange, in[j]=-min(x_i-x_j))
     def trajectories(self, t: float) -> tuple[np.ndarray, np.ndarray]:
         t_frac = Fraction(t)
         chosen = self.matrices[0]
@@ -220,7 +222,7 @@ def compute_trajectories(
     list[tuple[str, dict | None]],
 ]:
     """
-    Compute blue/red trajectories by sampling t and using shortest paths.
+    Compute out/in trajectories by sampling t and using shortest paths.
     """
 
     n = 4
@@ -229,16 +231,17 @@ def compute_trajectories(
     t_max = engine.max_t()
     freeze_times = engine.freeze_time_matrix()
 
-    blue_paths: list[list[np.ndarray]] = [[] for _ in range(n)]
-    red_paths: list[list[np.ndarray]] = [[] for _ in range(n)]
+    out_paths_list: list[list[np.ndarray]] = [[] for _ in range(n)]
+    in_paths_list: list[list[np.ndarray]] = [[] for _ in range(n)]
     t_values: list[float] = []
 
-    for t in np.linspace(0.0, t_max, steps):
+    t_start = min(t_max, 0.1)
+    for t in np.linspace(t_start, t_max, steps):
         t_values.append(t)
         out_dists, in_dists = engine.trajectories(t)
         for i in range(n):
-            blue_paths[i].append(project_point(out_dists[i, :]))
-            red_paths[i].append(project_point(in_dists[i, :]))
+            out_paths_list[i].append(project_point(out_dists[i, :]))
+            in_paths_list[i].append(project_point(in_dists[i, :]))
 
     transition_ts = [entry[0] for entry in engine.matrices]
     interval_labels: list[str] = []
@@ -258,11 +261,11 @@ def compute_trajectories(
         poly_info.append((start_str, polytope_geometry(out_dists)))
 
     t_arr = np.array(t_values, dtype=float)
-    blue_arrays = [np.vstack(path) if path else np.empty((0, 3)) for path in blue_paths]
-    red_arrays = [np.vstack(path) if path else np.empty((0, 3)) for path in red_paths]
+    out_paths = [np.vstack(path) if path else np.empty((0, 3)) for path in out_paths_list]
+    in_paths = [np.vstack(path) if path else np.empty((0, 3)) for path in in_paths_list]
     return (
-        blue_arrays,
-        red_arrays,
+        out_paths,
+        in_paths,
         dist0,
         freeze_times,
         t_arr,
@@ -372,22 +375,23 @@ def polytope_geometry(weights: np.ndarray):
 
 
 def plot_trajectories(
-    blue_paths: list[np.ndarray],
-    red_paths: list[np.ndarray],
+    out_paths: list[np.ndarray],
+    in_paths: list[np.ndarray],
     t_values: np.ndarray,
     polytopes: list[tuple[str, np.ndarray, list[tuple[int, int]]]],
     axis_dirs: np.ndarray,
     show_out: bool,
     show_in: bool,
+    labels_3d: list[tuple[np.ndarray, str, str]],
 ) -> go.Figure:
-    blue_color = "#4C78A8"  # muted blue
-    red_color = "#F28E2B"  # muted orange
+    out_color = "#4C78A8"  # blue for out-distances
+    in_color = "#F28E2B"  # orange for in-distances
     fig = go.Figure()
 
     all_pts: list[np.ndarray] = []
 
     if show_out:
-        for idx, path in enumerate(blue_paths):
+        for idx, path in enumerate(out_paths):
             if len(path) == 0:
                 continue
             all_pts.append(path)
@@ -398,14 +402,15 @@ def plot_trajectories(
                     z=path[:, 2],
                     mode="lines+markers",
                     name=f"Out-distance {idx}",
-                    line=dict(color=blue_color, width=4),
-                    marker=dict(size=4, color=blue_color),
+                    line=dict(color=out_color, width=4),
+                    marker=dict(size=4, color=out_color),
                     hoverinfo="skip",
+                    showlegend=False,
                 )
             )
 
     if show_in:
-        for idx, path in enumerate(red_paths):
+        for idx, path in enumerate(in_paths):
             if len(path) == 0:
                 continue
             all_pts.append(path)
@@ -416,9 +421,10 @@ def plot_trajectories(
                     z=path[:, 2],
                     mode="lines+markers",
                     name=f"In-distance {idx}",
-                    line=dict(color=red_color, width=4, dash="dash"),
-                    marker=dict(size=4, color=red_color),
+                    line=dict(color=in_color, width=4, dash="dash"),
+                    marker=dict(size=4, color=in_color),
                     hoverinfo="skip",
+                    showlegend=False,
                 )
             )
 
@@ -429,17 +435,6 @@ def plot_trajectories(
                 continue
             color = colors[idx % len(colors)]
             all_pts.append(poly_vertices)
-            fig.add_trace(
-                go.Scatter3d(
-                    x=poly_vertices[:, 0],
-                    y=poly_vertices[:, 1],
-                    z=poly_vertices[:, 2],
-                    mode="markers",
-                    name=f"Polytope t={label}",
-                    marker=dict(size=6, color=color, opacity=0.9, symbol="diamond"),
-                    hoverinfo="skip",
-                )
-            )
             for i, j in poly_edges:
                 pts = poly_vertices[[i, j]]
                 fig.add_trace(
@@ -474,6 +469,32 @@ def plot_trajectories(
                 showlegend=False,
             )
         )
+
+    in_points = [(p, txt) for p, txt, kind in labels_3d if kind == "in"]
+    out_points = [(p, txt) for p, txt, kind in labels_3d if kind == "out"]
+
+    def add_group(points, color, name, show_legend=True, symbol=None, visible=True):
+        if not points or not visible:
+            return
+        xs, ys, zs, texts = zip(*[(p[0], p[1], p[2], txt) for p, txt in points])
+        fig.add_trace(
+            go.Scatter3d(
+                x=list(xs),
+                y=list(ys),
+                z=list(zs),
+                mode="markers+text",
+                name=name,
+                marker=dict(size=12, color=color, opacity=0.95, symbol=symbol or "circle"),
+                text=list(texts),
+                textposition="middle center",
+                textfont=dict(color="white", size=12),
+                hoverinfo="skip",
+                showlegend=show_legend,
+            )
+        )
+
+    add_group(out_points, out_color, "blue: out[i]=(max(x_j - x_i) | j=0..3)", visible=show_out)
+    add_group(in_points, in_color, "orange: in[j]= (max(x_j - x_i) | i=0..3)", visible=show_in)
 
     if all_pts:
         pts = np.vstack(all_pts)
@@ -540,8 +561,8 @@ steps = 160
 
 
 (
-    blue_paths,
-    red_paths,
+    out_paths,
+    in_paths,
     dist0,
     freeze_times,
     t_samples,
@@ -565,11 +586,34 @@ axis_dirs = np.vstack(canonical_dirs)
 
 poly_overlays: list[tuple[str, np.ndarray, list[tuple[int, int]]]] = []
 poly_debug_items: list[tuple[str, dict]] = []
+label_points: list[tuple[np.ndarray, str, str, str]] = []
 for label, geom in poly_info:
     if geom is None:
         continue
     poly_overlays.append((label, geom["vertices3"], geom["edges"]))
     poly_debug_items.append((label, geom))
+
+base_geom = None
+for lbl, geom in poly_info:
+    if lbl == "0" and geom is not None:
+        base_geom = geom
+        break
+if base_geom is None and poly_overlays:
+    # fallback to the first available
+    first_label, first_vertices, _ = poly_overlays[0]
+    base_geom = {"vertices3": first_vertices}
+
+if base_geom is not None:
+    verts = np.asarray(base_geom["vertices3"])
+    for j in range(4):
+        direction = axis_dirs[j]
+        dots = verts @ direction
+        max_idx = int(np.argmax(dots))
+        min_idx = int(np.argmin(dots))
+        max_pt = verts[max_idx]
+        min_pt = verts[min_idx]
+        label_points.append((max_pt, f"{j}", "in"))
+        label_points.append((min_pt, f"{j}", "out"))
 
 status_col, meta_col = st.columns([3, 1])
 with status_col:
@@ -577,13 +621,14 @@ with status_col:
         st.error("The graph already has a negative cycle at t = 0. The polytope is empty.")
 
     fig = plot_trajectories(
-        blue_paths,
-        red_paths,
+        out_paths,
+        in_paths,
         t_samples,
         poly_overlays,
         axis_dirs,
         show_out,
         show_in,
+        label_points,
     )
     st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
 
