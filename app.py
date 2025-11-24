@@ -508,7 +508,7 @@ def plot_trajectories(
     return fig
 
 
-st.title("Zonotope Trajectory Visualizer")
+st.title("Polytrope Trajectory Visualizer")
 st.write(
     "Explore the 4-vertex weighted directed graph, its shortest-path vertices, "
     "and how they move as weights are shifted by a parameter t."
@@ -625,7 +625,7 @@ with meta_col:
     st.subheader("Notes")
     st.markdown(
         "- Out-distance i: shortest paths from i to every j.\n"
-        "- In-distance i: shortest paths from every j to i (sign-flipped for display).\n"
+        "- In-distance i: shortest paths from every j to i (sign-flipped).\n"
         "- Projection: orthogonal to (1,1,1,1) onto an isometric 3D frame.\n"
         "- Grey vertices/edges: the feasible polytope (with sum(x)=0 slice).\n"
         "- Dotted axes show projected directions of the canonical basis e0..e3."
