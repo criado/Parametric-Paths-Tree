@@ -79,6 +79,18 @@ class ParametricPaths:
                             self.freeze_times[j][i] = t
                         dmat[i][j] = Fraction(0)
                         dmat[j][i] = Fraction(0)
+                    else:
+                        dmat[i][j] = -Fraction(1)
+                        dmat[j][i] = -Fraction(1)
+
+            for k in range(n):
+                for i in range(n):
+                    for j in range(n):
+                        cand = (mat[i][k] + mat[k][j], (dmat[i][k] + dmat[k][j]))
+                        cur = (mat[i][j], dmat[i][j])
+                        if cand < cur:
+                            mat[i][j] = mat[i][k] + mat[k][j]
+                            dmat[i][j] = dmat[i][k] + dmat[k][j]
 
             self.matrices.append((t, copy.deepcopy(mat), copy.deepcopy(dmat)))
             if all(dmat[i][j] == 0 for i in range(n) for j in range(n)):
@@ -485,28 +497,26 @@ st.write(
 
 with st.sidebar:
     st.header("Graph Weights")
-    st.caption("Edit the 4×4 weight matrix. Diagonal entries stay at 0.")
     initial = pd.DataFrame(
         default_weights(),
-        columns=["v0→v0", "v0→v1", "v0→v2", "v0→v3"],
-        index=["v0", "v1", "v2", "v3"],
+        columns=["v_0", "v_1", "v_2", "v_3"],
+        index=["v_0", "v_1", "v_2", "v_3"],
     )
     edited_df = st.data_editor(
         initial,
         key="weights",
         num_rows="fixed",
-        width="stretch",
+        width=320,
     )
 
     weights = edited_df.to_numpy(dtype=float)
     np.fill_diagonal(weights, 0.0)
 
-    st.header("Sampling")
-    steps = st.slider("Samples", min_value=10, max_value=400, value=120, step=1)
-    st.caption("We sample t from 0 up to the computed max_t (min mean cycle bound).")
     st.header("Visibility")
     show_out = st.checkbox("Show out-trajectories", value=True)
     show_in = st.checkbox("Show in-trajectories", value=True)
+
+steps = 160
 
 
 blue_paths, red_paths, dist0, freeze_times, t_samples, interval_labels, interval_symbolic = compute_trajectories(
@@ -563,6 +573,10 @@ with meta_col:
         )
 
     st.markdown("---")
+    st.subheader("Freeze times")
+    ft_df = pd.DataFrame(freeze_times, columns=["v0", "v1", "v2", "v3"], index=["v0", "v1", "v2", "v3"])
+    st.dataframe(ft_df, width="stretch")
+
     if poly_geom:
         st.subheader("Polytope debug")
         A, b = poly_geom["constraints"]
@@ -577,10 +591,6 @@ with meta_col:
                 st.write("Constraint shapes differ; showing separately.")
                 st.dataframe(pd.DataFrame(A, columns=["a0", "a1", "a2"]))
                 st.dataframe(pd.DataFrame(b, columns=["b"]))
-
-    st.subheader("Freeze times")
-    ft_df = pd.DataFrame(freeze_times, columns=["v0", "v1", "v2", "v3"], index=["v0", "v1", "v2", "v3"])
-    st.dataframe(ft_df, width="stretch")
 
     st.subheader("Notes")
     st.markdown(
