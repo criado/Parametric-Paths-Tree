@@ -15,7 +15,7 @@ def default_weights() -> np.ndarray:
     """Provide a simple strongly connected 4x4 weight matrix."""
     return np.array(
         [
-            [0.0, 1.0, 4.0, 1.0],
+            [0.0, 1.0, 0.5, 1.0],
             [1.0, 0.0, 2.0, 3.0],
             [3.0, 1.0, 0.0, 2.0],
             [2.0, 3.0, 1.0, 0.0],
@@ -115,11 +115,11 @@ class ParametricPaths:
         return float(self.matrices[-1][0])
 
     def freeze_time_matrix(self) -> np.ndarray:
-        out = np.full((self.n, self.n), np.nan, dtype=float)
+        out = np.full((self.n, self.n), "", dtype=object)
         for i in range(self.n):
             for j in range(self.n):
                 if self.freeze_times[i][j] is not None:
-                    out[i, j] = float(self.freeze_times[i][j])
+                    out[i, j] = self._fmt_fraction(self.freeze_times[i][j])
         return out
 
     def trajectories(self, t: float) -> tuple[np.ndarray, np.ndarray]:
@@ -161,12 +161,13 @@ class ParametricPaths:
                     row.append(self._fmt_fraction(base))
                 else:
                     base_str = "" if base == 0 else self._fmt_fraction(base)
-                    slope_str = self._fmt_fraction(abs(slope))
+                    slope_abs = abs(slope)
+                    slope_str = "" if slope_abs == 1 else self._fmt_fraction(slope_abs)
                     sign = "-" if slope < 0 else "+"
                     if base == 0:
-                        row.append(f"{'-' if slope<0 else ''}{slope_str}t")
+                        row.append(f"{'-' if slope<0 else ''}{slope_str}t" if slope_str else ("-t" if slope<0 else "t"))
                     else:
-                        row.append(f"{base_str}{sign}{slope_str}t")
+                        row.append(f"{base_str}{sign}{slope_str}t" if slope_str else f"{base_str}{sign}t")
             result.append(row)
         return result
 
@@ -216,6 +217,7 @@ def compute_trajectories(
     np.ndarray,
     list[str],
     list[list[list[str]]],
+    list[tuple[str, dict | None]],
 ]:
     """
     Compute blue/red trajectories by sampling t and using shortest paths.
@@ -241,6 +243,7 @@ def compute_trajectories(
     transition_ts = [entry[0] for entry in engine.matrices]
     interval_labels: list[str] = []
     interval_symbolic: list[list[list[str]]] = []
+    poly_info: list[tuple[str, dict | None]] = []
     for idx, start in enumerate(transition_ts):
         end = transition_ts[idx + 1] if idx + 1 < len(transition_ts) else None
         start_str = ParametricPaths._fmt_fraction(start)
@@ -251,11 +254,22 @@ def compute_trajectories(
             label = f"{start_str} <= t <= {end_str}"
         interval_labels.append(label)
         interval_symbolic.append(engine.symbolic_matrix(float(start)))
+        out_dists, _ = engine.trajectories(float(start))
+        poly_info.append((start_str, polytope_geometry(out_dists)))
 
     t_arr = np.array(t_values, dtype=float)
     blue_arrays = [np.vstack(path) if path else np.empty((0, 3)) for path in blue_paths]
     red_arrays = [np.vstack(path) if path else np.empty((0, 3)) for path in red_paths]
-    return blue_arrays, red_arrays, dist0, freeze_times, t_arr, interval_labels, interval_symbolic
+    return (
+        blue_arrays,
+        red_arrays,
+        dist0,
+        freeze_times,
+        t_arr,
+        interval_labels,
+        interval_symbolic,
+        poly_info,
+    )
 
 
 def build_halfspaces(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -361,8 +375,7 @@ def plot_trajectories(
     blue_paths: list[np.ndarray],
     red_paths: list[np.ndarray],
     t_values: np.ndarray,
-    poly_vertices: np.ndarray | None,
-    poly_edges: list[tuple[int, int]] | None,
+    polytopes: list[tuple[str, np.ndarray, list[tuple[int, int]]]],
     axis_dirs: np.ndarray,
     show_out: bool,
     show_in: bool,
@@ -409,33 +422,38 @@ def plot_trajectories(
                 )
             )
 
-    if poly_vertices is not None and poly_edges is not None:
-        all_pts.append(poly_vertices)
-        fig.add_trace(
-            go.Scatter3d(
-                x=poly_vertices[:, 0],
-                y=poly_vertices[:, 1],
-                z=poly_vertices[:, 2],
-                mode="markers",
-                name="Polytope vertices",
-                marker=dict(size=6, color="#444", opacity=0.9, symbol="diamond"),
-                hoverinfo="skip",
-            )
-        )
-        for i, j in poly_edges:
-            pts = poly_vertices[[i, j]]
+    if polytopes:
+        colors = ["#555", "#777", "#999", "#BBB", "#333", "#AAA"]
+        for idx, (label, poly_vertices, poly_edges) in enumerate(polytopes):
+            if poly_vertices is None or poly_edges is None:
+                continue
+            color = colors[idx % len(colors)]
+            all_pts.append(poly_vertices)
             fig.add_trace(
                 go.Scatter3d(
-                    x=pts[:, 0],
-                    y=pts[:, 1],
-                    z=pts[:, 2],
-                    mode="lines",
-                    name="Polytope edges",
-                    line=dict(color="#888", width=3),
+                    x=poly_vertices[:, 0],
+                    y=poly_vertices[:, 1],
+                    z=poly_vertices[:, 2],
+                    mode="markers",
+                    name=f"Polytope t={label}",
+                    marker=dict(size=6, color=color, opacity=0.9, symbol="diamond"),
                     hoverinfo="skip",
-                    showlegend=False,
                 )
             )
+            for i, j in poly_edges:
+                pts = poly_vertices[[i, j]]
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=pts[:, 0],
+                        y=pts[:, 1],
+                        z=pts[:, 2],
+                        mode="lines",
+                        name=f"Polytope edges t={label}",
+                        line=dict(color=color, width=3),
+                        hoverinfo="skip",
+                        showlegend=False,
+                    )
+                )
 
     # Axes for e0..e3 (centered to sum=0)
     axis_scale = 1.5
@@ -484,6 +502,7 @@ def plot_trajectories(
         ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
         margin=dict(l=0, r=0, b=0, t=30),
+        height=675,
     )
     return fig
 
@@ -499,8 +518,8 @@ with st.sidebar:
     st.header("Graph Weights")
     initial = pd.DataFrame(
         default_weights(),
-        columns=["v_0", "v_1", "v_2", "v_3"],
-        index=["v_0", "v_1", "v_2", "v_3"],
+        columns=["v0", "v1", "v2", "v3"],
+        index=["v0", "v1", "v2", "v3"],
     )
     edited_df = st.data_editor(
         initial,
@@ -519,19 +538,20 @@ with st.sidebar:
 steps = 160
 
 
-blue_paths, red_paths, dist0, freeze_times, t_samples, interval_labels, interval_symbolic = compute_trajectories(
+(
+    blue_paths,
+    red_paths,
+    dist0,
+    freeze_times,
+    t_samples,
+    interval_labels,
+    interval_symbolic,
+    poly_info,
+) = compute_trajectories(
     weights, steps
 )
 
 neg_cycle_at_zero = np.any(np.diag(dist0) < 0)
-
-# Polytope geometry at t = 0 (only if feasible)
-poly_geom = None if neg_cycle_at_zero else polytope_geometry(weights)
-poly_vertices_proj = None
-poly_edges = None
-if poly_geom is not None:
-    poly_vertices_proj = poly_geom["vertices3"]
-    poly_edges = poly_geom["edges"]
 
 # Axes directions projected (centered to sum=0)
 canonical_dirs = []
@@ -542,6 +562,14 @@ for k in range(4):
     canonical_dirs.append(project_point(centered))
 axis_dirs = np.vstack(canonical_dirs)
 
+poly_overlays: list[tuple[str, np.ndarray, list[tuple[int, int]]]] = []
+poly_debug_items: list[tuple[str, dict]] = []
+for label, geom in poly_info:
+    if geom is None:
+        continue
+    poly_overlays.append((label, geom["vertices3"], geom["edges"]))
+    poly_debug_items.append((label, geom))
+
 status_col, meta_col = st.columns([3, 1])
 with status_col:
     if neg_cycle_at_zero:
@@ -551,13 +579,12 @@ with status_col:
         blue_paths,
         red_paths,
         t_samples,
-        poly_vertices_proj,
-        poly_edges,
+        poly_overlays,
         axis_dirs,
         show_out,
         show_in,
     )
-    st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True, height=800)
+    st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
 
 with meta_col:
     st.subheader("Parametric distances")
@@ -577,20 +604,22 @@ with meta_col:
     ft_df = pd.DataFrame(freeze_times, columns=["v0", "v1", "v2", "v3"], index=["v0", "v1", "v2", "v3"])
     st.dataframe(ft_df, width="stretch")
 
-    if poly_geom:
+    if poly_debug_items:
         st.subheader("Polytope debug")
-        A, b = poly_geom["constraints"]
-        A = np.atleast_2d(np.asarray(A, dtype=float))
-        b = np.atleast_1d(np.asarray(b, dtype=float))
-        st.caption(f"{A.shape[0]} inequalities in sum-zero slice, {len(poly_edges) if poly_edges else 0} edges.")
-        with st.expander("Show A | b"):
-            if b.shape[0] == A.shape[0]:
-                stacked = np.hstack([A, b[:, None]])
-                st.dataframe(pd.DataFrame(stacked, columns=["a0", "a1", "a2", "b"]))
-            else:
-                st.write("Constraint shapes differ; showing separately.")
-                st.dataframe(pd.DataFrame(A, columns=["a0", "a1", "a2"]))
-                st.dataframe(pd.DataFrame(b, columns=["b"]))
+        for label, geom in poly_debug_items:
+            A, b = geom["constraints"]
+            A = np.atleast_2d(np.asarray(A, dtype=float))
+            b = np.atleast_1d(np.asarray(b, dtype=float))
+            edges = geom.get("edges", [])
+            st.caption(f"t = {label}: {A.shape[0]} inequalities, {len(edges)} edges.")
+            with st.expander(f"Show A | b (t={label})"):
+                if b.shape[0] == A.shape[0]:
+                    stacked = np.hstack([A, b[:, None]])
+                    st.dataframe(pd.DataFrame(stacked, columns=["a0", "a1", "a2", "b"]))
+                else:
+                    st.write("Constraint shapes differ; showing separately.")
+                    st.dataframe(pd.DataFrame(A, columns=["a0", "a1", "a2"]))
+                    st.dataframe(pd.DataFrame(b, columns=["b"]))
 
     st.subheader("Notes")
     st.markdown(
