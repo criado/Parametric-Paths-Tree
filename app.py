@@ -16,9 +16,9 @@ def default_weights() -> np.ndarray:
     return np.array(
         [
             [0.0, 1.0, 0.5, 1.0],
-            [1.0, 0.0, 2.0, 3.0],
-            [3.0, 1.0, 0.0, 2.0],
-            [2.0, 3.0, 1.0, 0.0],
+            [1.0, 0.0, 99, 99],
+            [99, 1.0, 0.0, 2.0],
+            [2.0, 99, 1.0, 0.0],
         ]
     )
 
@@ -518,9 +518,33 @@ def plot_trajectories(
             aspectratio=dict(x=1, y=1, z=1),
             dragmode="orbit",
             camera=dict(projection=dict(type="orthographic")),
-            xaxis=dict(showgrid=False, showbackground=False, zeroline=False, range=xr, showticklabels=False, ticks=""),
-            yaxis=dict(showgrid=False, showbackground=False, zeroline=False, range=yr, showticklabels=False, ticks=""),
-            zaxis=dict(showgrid=False, showbackground=False, zeroline=False, range=zr, showticklabels=False, ticks=""),
+            xaxis=dict(
+                showgrid=False,
+                showbackground=False,
+                zeroline=False,
+                range=xr,
+                showticklabels=False,
+                ticks="",
+                showspikes=False,
+            ),
+            yaxis=dict(
+                showgrid=False,
+                showbackground=False,
+                zeroline=False,
+                range=yr,
+                showticklabels=False,
+                ticks="",
+                showspikes=False,
+            ),
+            zaxis=dict(
+                showgrid=False,
+                showbackground=False,
+                zeroline=False,
+                range=zr,
+                showticklabels=False,
+                ticks="",
+                showspikes=False,
+            ),
         ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
         margin=dict(l=0, r=0, b=0, t=30),
