@@ -553,12 +553,8 @@ def plot_trajectories(
         pts = np.vstack(all_pts)
         mins = pts.min(axis=0)
         maxs = pts.max(axis=0)
-        center = (mins + maxs) / 2
-        span = max((maxs - mins).max(), 1e-6)
-        half = span / 2
-        xr = [center[0] - half, center[0] + half]
-        yr = [center[1] - half, center[1] + half]
-        zr = [center[2] - half, center[2] + half]
+        max_abs = max(np.abs(mins).max(), np.abs(maxs).max(), 1e-6)
+        xr = yr = zr = [-max_abs, max_abs]
     else:
         xr = yr = zr = [-1, 1]
 
@@ -570,7 +566,7 @@ def plot_trajectories(
             aspectmode="manual",
             aspectratio=dict(x=1, y=1, z=1),
             dragmode="orbit",
-            camera=dict(projection=dict(type="orthographic")),
+            camera=dict(projection=dict(type="orthographic"), center=dict(x=0, y=0, z=0)),
             xaxis=dict(
                 showgrid=False,
                 showbackground=False,
@@ -656,12 +652,8 @@ def plot_polytope_only(
         pts = np.vstack(all_pts)
         mins = pts.min(axis=0)
         maxs = pts.max(axis=0)
-        center = (mins + maxs) / 2
-        span = max((maxs - mins).max(), 1e-6)
-        half = span / 2
-        xr = [center[0] - half, center[0] + half]
-        yr = [center[1] - half, center[1] + half]
-        zr = [center[2] - half, center[2] + half]
+        max_abs = max(np.abs(mins).max(), np.abs(maxs).max(), 1e-6)
+        xr = yr = zr = [-max_abs, max_abs]
     else:
         xr = yr = zr = [-1, 1]
 
@@ -674,7 +666,7 @@ def plot_polytope_only(
             aspectmode="manual",
             aspectratio=dict(x=1, y=1, z=1),
             dragmode="orbit",
-            camera=dict(projection=dict(type="orthographic")),
+            camera=dict(projection=dict(type="orthographic"), center=dict(x=0, y=0, z=0)),
             xaxis=dict(
                 showgrid=False,
                 showbackground=False,
