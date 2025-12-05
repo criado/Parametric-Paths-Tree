@@ -17,7 +17,7 @@ def default_weights() -> np.ndarray:
         [
             [0.0, 1.0, 0.5, 1.0],
             [1.0, 0.0, 99, 99],
-            [99, 1.0, 0.0, 2.0],
+            [1.0, 1.0, 0.0, 2.0],
             [2.0, 99, 1.0, 0.0],
         ]
     )
@@ -373,6 +373,56 @@ def polytope_geometry(weights: np.ndarray):
     }
 
 
+def zonotropal_summands(polytrope: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Placeholder that should return (zonotropal, antizonotropal) polytropes.
+
+    Replace this with the proper decomposition logic. For now it simply returns
+    copies of the input so the visualizer can render something.
+    """
+    from itertools import combinations
+
+    n = polytrope.shape[0]
+
+    antizono= polytrope.copy()
+    zono= np.zeros((n,n))
+
+    for k in range(n):
+      for i in range(n):
+        for j in range(n):
+          antizono[i][j]=min(antizono[i][j], antizono[i][k]+antizono[k][j])
+
+    for i in range(1,n-1):
+      for s in combinations(range(n), i):
+        t= [x for x in range(n) if x not in s]
+        from math import inf
+        mu= inf
+        for a in s:
+          for b in s:
+            for c in t:
+              for d in t:
+                mu=min(mu, antizono[b][c]-antizono[d][c]+antizono[d][a]-antizono[b][a])
+        if mu>0:
+          for a in s:
+            for c in t:
+              antizono[a][c]-=mu/2
+              antizono[c][a]-=mu/2
+              zono[a][c]+=mu/2
+              zono[c][a]+=mu/2
+    
+    return zono, antizono
+
+
+def nudge_off_diagonal(mat: np.ndarray, eps: float = 0.001) -> np.ndarray:
+    """Add a small epsilon to off-diagonal entries to avoid degenerate plots."""
+    nudged = mat.copy()
+    for i in range(nudged.shape[0]):
+        for j in range(nudged.shape[1]):
+            if i != j:
+                nudged[i, j] += eps
+    return nudged
+
+
 def plot_trajectories(
     out_paths: list[np.ndarray],
     in_paths: list[np.ndarray],
@@ -556,6 +606,109 @@ def plot_trajectories(
     return fig
 
 
+def plot_polytope_only(
+    poly_vertices: np.ndarray | None,
+    poly_edges: list[tuple[int, int]] | None,
+    axis_dirs: np.ndarray,
+    title: str,
+) -> go.Figure:
+    """Render a single polytope with just its edges and the canonical axes."""
+    fig = go.Figure()
+    all_pts: list[np.ndarray] = []
+
+    if poly_vertices is not None and poly_edges is not None:
+        all_pts.append(poly_vertices)
+        for i, j in poly_edges:
+            pts = poly_vertices[[i, j]]
+            fig.add_trace(
+                go.Scatter3d(
+                    x=pts[:, 0],
+                    y=pts[:, 1],
+                    z=pts[:, 2],
+                    mode="lines",
+                    name="Polytope edge",
+                    line=dict(color="#555", width=4),
+                    hoverinfo="skip",
+                    showlegend=False,
+                )
+            )
+
+    axis_scale = 1.5
+    for idx, direction in enumerate(axis_dirs):
+        vec = direction * axis_scale
+        all_pts.append(np.vstack([[0, 0, 0], vec]))
+        fig.add_trace(
+            go.Scatter3d(
+                x=[0, vec[0]],
+                y=[0, vec[1]],
+                z=[0, vec[2]],
+                mode="lines+text",
+                name=f"e{idx} axis",
+                line=dict(color="#222", width=2, dash="dot"),
+                text=[None, f"e{idx}"],
+                textposition="top center",
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
+    if all_pts:
+        pts = np.vstack(all_pts)
+        mins = pts.min(axis=0)
+        maxs = pts.max(axis=0)
+        center = (mins + maxs) / 2
+        span = max((maxs - mins).max(), 1e-6)
+        half = span / 2
+        xr = [center[0] - half, center[0] + half]
+        yr = [center[1] - half, center[1] + half]
+        zr = [center[2] - half, center[2] + half]
+    else:
+        xr = yr = zr = [-1, 1]
+
+    fig.update_layout(
+        title=title,
+        scene=dict(
+            xaxis_title="",
+            yaxis_title="",
+            zaxis_title="",
+            aspectmode="manual",
+            aspectratio=dict(x=1, y=1, z=1),
+            dragmode="orbit",
+            camera=dict(projection=dict(type="orthographic")),
+            xaxis=dict(
+                showgrid=False,
+                showbackground=False,
+                zeroline=False,
+                range=xr,
+                showticklabels=False,
+                ticks="",
+                showspikes=False,
+            ),
+            yaxis=dict(
+                showgrid=False,
+                showbackground=False,
+                zeroline=False,
+                range=yr,
+                showticklabels=False,
+                ticks="",
+                showspikes=False,
+            ),
+            zaxis=dict(
+                showgrid=False,
+                showbackground=False,
+                zeroline=False,
+                range=zr,
+                showticklabels=False,
+                ticks="",
+                showspikes=False,
+            ),
+        ),
+        margin=dict(l=0, r=0, b=0, t=50),
+        height=480,
+    )
+    return fig
+
+
 st.title("Polytrope Trajectory Visualizer")
 st.write(
     "Explore the 4-vertex weighted directed graph, its shortest-path vertices, "
@@ -642,6 +795,21 @@ if base_geom is not None:
         label_points.append((max_pt, f"{j}", "in"))
         label_points.append((min_pt, f"{j}", "out"))
 
+zonotropal_polytope = None
+antizonotropal_polytope = None
+try:
+    zonotropal_polytope, antizonotropal_polytope = zonotropal_summands(dist0)
+except NotImplementedError:
+    st.warning("Define zonotropal_summands to see zonotropal/antizonotropal plots.")
+except Exception as exc:  # pragma: no cover - defensive for user edits
+    st.warning(f"Zonotropal decomposition failed: {exc}")
+
+zono_display = nudge_off_diagonal(zonotropal_polytope) if zonotropal_polytope is not None else None
+anti_display = nudge_off_diagonal(antizonotropal_polytope) if antizonotropal_polytope is not None else None
+
+zono_geom = polytope_geometry(zono_display) if zono_display is not None else None
+anti_geom = polytope_geometry(anti_display) if anti_display is not None else None
+
 status_col, meta_col = st.columns([3, 1])
 with status_col:
     if neg_cycle_at_zero:
@@ -658,6 +826,18 @@ with status_col:
         label_points,
     )
     st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+
+    zono_vertices = zono_geom["vertices3"] if zono_geom else None
+    zono_edges = zono_geom["edges"] if zono_geom else None
+    #st.subheader("Zonotropal summand")
+    zono_fig = plot_polytope_only(zono_vertices, zono_edges, axis_dirs, "Zonotropal summand")
+    st.plotly_chart(zono_fig, config={"displayModeBar": False}, use_container_width=True)
+
+    anti_vertices = anti_geom["vertices3"] if anti_geom else None
+    anti_edges = anti_geom["edges"] if anti_geom else None
+    #st.subheader("Antizonotropal summand")
+    anti_fig = plot_polytope_only(anti_vertices, anti_edges, axis_dirs, "Antizonotropal summand")
+    st.plotly_chart(anti_fig, config={"displayModeBar": False}, use_container_width=True)
 
 with meta_col:
     st.subheader("Parametric distances")
@@ -676,6 +856,19 @@ with meta_col:
     st.subheader("Freeze times")
     ft_df = pd.DataFrame(freeze_times, columns=["v0", "v1", "v2", "v3"], index=["v0", "v1", "v2", "v3"])
     st.dataframe(ft_df, width="stretch")
+
+    if zonotropal_polytope is not None and antizonotropal_polytope is not None:
+        st.subheader("Zono / Antizono matrices")
+        st.markdown("Zonotropal summand")
+        st.dataframe(
+            pd.DataFrame(zono_display, columns=["v0", "v1", "v2", "v3"], index=["v0", "v1", "v2", "v3"]),
+            width="stretch",
+        )
+        st.markdown("Antizonotropal summand")
+        st.dataframe(
+            pd.DataFrame(anti_display, columns=["v0", "v1", "v2", "v3"], index=["v0", "v1", "v2", "v3"]),
+            width="stretch",
+        )
 
     if poly_debug_items:
         st.subheader("Polytope debug")
