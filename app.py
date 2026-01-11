@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from fractions import Fraction
-from scipy.optimize import linprog
+from scipy.optimize import linprog, minimize
 from scipy.spatial import ConvexHull, HalfspaceIntersection
 from itertools import permutations
 import streamlit as st
@@ -173,6 +173,24 @@ class ParametricPaths:
             result.append(row)
         return result
 
+    def trajectory_tree_length(self, t_values: np.ndarray) -> float:
+        ans=0
+
+        def tropdist(x,y):
+          v= [xx-yy for xx,yy in zip(x,y)]
+
+          return max(v)-min(v)
+
+        for i in range(len(self.matrices)-1):
+          _, m1, _ = self.matrices[i]
+          _, m2, _ = self.matrices[i+1]
+
+          for j in range(4):
+            if not any(tropdist(m1[j],m1[k])==0 for k in range(j)):
+              ans+=tropdist(m1[j],m2[j])
+        
+        return ans
+
 def sum_zero_basis() -> np.ndarray:
     """Orthonormal basis of the hyperplane x0+x1+x2+x3 = 0."""
     base = np.array(
@@ -211,7 +229,7 @@ def project_point(point4: np.ndarray) -> np.ndarray:
 
 def compute_trajectories(
     base_weights: np.ndarray, steps: int
-) -> tuple[
+    ) -> tuple[
     list[np.ndarray],
     list[np.ndarray],
     np.ndarray,
@@ -220,6 +238,7 @@ def compute_trajectories(
     list[str],
     list[list[list[str]]],
     list[tuple[str, dict | None]],
+    ParametricPaths,
 ]:
     """
     Compute out/in trajectories by sampling t and using shortest paths.
@@ -271,6 +290,7 @@ def compute_trajectories(
         interval_labels,
         interval_symbolic,
         poly_info,
+        engine,
     )
 
 
@@ -446,14 +466,69 @@ def metric_tight_span(polytrope: np.ndarray) -> list[np.ndarray]:
 
     return polytropes
 
+def steiner_tree_edges(
+    polytrope: np.ndarray,
+) -> tuple[list[tuple[np.ndarray, np.ndarray]], float | None]:
+    n= len(polytrope)
+    assert(n==4)
 
-def steiner_tree_edges(polytrope: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
-    """
-    Placeholder for Steiner tree computation.
+    for k in range(n):
+      for i in range(n):
+        for j in range(n):
+          assert(polytrope[i][j]<=polytrope[i][k]+polytrope[k][j])
 
-    Return a list of edges as (start, end) 3D points.
-    """
-    return []
+    i=0
+
+    besttree: list[tuple[np.ndarray, np.ndarray]] | None = None
+    from math import inf
+    bestlength= inf
+
+    for j in range(1,4):
+      # i,j are in a side of the partition, 
+      # k,l are the other side
+      k,l=None, None
+      if j==1: k,l= 2,3
+      if j==2: k,l= 1,3
+      if j==3: k,l= 1,2
+
+      # i,j connect to x
+      # k,l connect to y
+
+      # receives two np vectors
+      def tropdist(x,y):
+        v= x-y
+        return max(v)-min(v)
+
+      def f(x,y):
+        return tropdist(x,polytrope[i])+tropdist(x,polytrope[j])\
+              +tropdist(x,y)\
+              +tropdist(y,polytrope[k])+tropdist(y,polytrope[l])
+
+      # please codex find the pair of points minimizing f(x,y) using nelder mead or something.
+      x0 = 0.5 * (polytrope[i] + polytrope[j])
+      y0 = 0.5 * (polytrope[k] + polytrope[l])
+      def f_flat(v):
+        return f(v[:n], v[n:])
+      res = minimize(
+        f_flat,
+        np.hstack([x0, y0]),
+        method="Nelder-Mead",
+        options={"maxiter": 2000, "xatol": 1e-6, "fatol": 1e-6},
+      )
+      x, y = res.x[:n], res.x[n:]
+
+      length = f(x, y)
+      if length < bestlength:
+        besttree = [
+          (x, polytrope[i]),
+          (x, polytrope[j]),
+          (x, y),
+          (y, polytrope[k]),
+          (y, polytrope[l]),
+        ]
+        bestlength = length
+
+    return besttree or [], (None if bestlength == inf else bestlength)
 
 def tree_embedding_edges(polytrope: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
     """
@@ -462,7 +537,6 @@ def tree_embedding_edges(polytrope: np.ndarray) -> list[tuple[np.ndarray, np.nda
     Return a list of edges as (start, end) 3D points.
     """
     return []
-
 
 def nudge_off_diagonal(mat: np.ndarray, eps: float = 0.001) -> np.ndarray:
     """Add a small epsilon to off-diagonal entries to avoid degenerate plots."""
@@ -496,6 +570,12 @@ def plot_trajectories(
     fig = go.Figure()
 
     all_pts: list[np.ndarray] = []
+
+    def to_plot_point(pt: np.ndarray) -> np.ndarray:
+        arr = np.asarray(pt, dtype=float)
+        if arr.shape == (4,):
+            return project_point(arr)
+        return arr
 
     if show_out:
         for idx, path in enumerate(out_paths):
@@ -587,7 +667,7 @@ def plot_trajectories(
     if steiner_edges:
         show_legend = True
         for start, end in steiner_edges:
-            seg = np.vstack([start, end])
+            seg = np.vstack([to_plot_point(start), to_plot_point(end)])
             all_pts.append(seg)
             fig.add_trace(
                 go.Scatter3d(
@@ -595,7 +675,7 @@ def plot_trajectories(
                     y=seg[:, 1],
                     z=seg[:, 2],
                     mode="lines",
-                    name="Steiner tree",
+                    name="out-Steiner Tree",
                     line=dict(color=steiner_color, width=5),
                     hoverinfo="skip",
                     showlegend=show_legend,
@@ -606,7 +686,7 @@ def plot_trajectories(
     if tree_embedding_edges:
         show_legend = True
         for start, end in tree_embedding_edges:
-            seg = np.vstack([start, end])
+            seg = np.vstack([to_plot_point(start), to_plot_point(end)])
             all_pts.append(seg)
             fig.add_trace(
                 go.Scatter3d(
@@ -854,7 +934,7 @@ with st.sidebar:
     show_base_polytope = st.checkbox("Show base polytope", value=True)
     show_inner_polytopes = st.checkbox("Show inner polytropes", value=True)
     show_metric_tight_span = st.checkbox("Show metric tight span", value=False)
-    show_steiner_tree = st.checkbox("Show Steiner tree", value=False)
+    show_steiner_tree = st.checkbox("Show out-Steiner Tree", value=False)
     show_tree_embedding = st.checkbox("Show tree embedding", value=False)
     tight_span_edge_threshold = 1000.0
 
@@ -870,6 +950,7 @@ steps = 160
     interval_labels,
     interval_symbolic,
     poly_info,
+    param_engine,
 ) = compute_trajectories(
     weights, steps
 )
@@ -940,13 +1021,14 @@ if show_metric_tight_span:
         st.warning(f"Metric tight span failed: {exc}")
 
 steiner_edges: list[tuple[np.ndarray, np.ndarray]] = []
+steiner_length: float | None = None
 if show_steiner_tree:
     try:
-        steiner_edges = steiner_tree_edges(dist0)
+        steiner_edges, steiner_length = steiner_tree_edges(dist0)
     except NotImplementedError:
-        st.warning("Define steiner_tree_edges to see the Steiner tree.")
+        st.warning("Define steiner_tree_edges to see the out-Steiner Tree.")
     except Exception as exc:  # pragma: no cover - defensive for user edits
-        st.warning(f"Steiner tree failed: {exc}")
+        st.warning(f"out-Steiner Tree failed: {exc}")
 
 tree_embedding: list[tuple[np.ndarray, np.ndarray]] = []
 if show_tree_embedding:
@@ -992,6 +1074,16 @@ with status_col:
         label_points,
     )
     st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+    if show_steiner_tree:
+        if steiner_length is None:
+            st.caption("out-Steiner Tree length: (not available)")
+        else:
+            st.caption(f"out-Steiner Tree length: {steiner_length:.4f}")
+        try:
+            trajectory_length = param_engine.trajectory_tree_length(t_samples)
+            st.caption(f"Trajectory tree length: {trajectory_length:.4f}")
+        except Exception as exc:  # pragma: no cover - defensive for user edits
+            st.caption(f"Trajectory tree length failed: {exc}")
 
     zono_vertices = zono_geom["vertices3"] if zono_geom else None
     zono_edges = zono_geom["edges"] if zono_geom else None
@@ -1052,6 +1144,13 @@ with meta_col:
                     st.write("Constraint shapes differ; showing separately.")
                     st.dataframe(pd.DataFrame(A, columns=["a0", "a1", "a2"]))
                     st.dataframe(pd.DataFrame(b, columns=["b"]))
+
+    if (show_out or show_in) and not show_steiner_tree:
+        try:
+            trajectory_length = param_engine.trajectory_tree_length(t_samples)
+            st.caption(f"Trajectory tree length: {trajectory_length:.4f}")
+        except Exception as exc:  # pragma: no cover - defensive for user edits
+            st.caption(f"Trajectory tree length failed: {exc}")
 
     st.subheader("Notes")
     st.markdown(
