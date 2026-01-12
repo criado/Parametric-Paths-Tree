@@ -429,7 +429,7 @@ def zonotropal_summands(polytrope: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return zono, antizono, length
 
 
-def metric_tight_span(polytrope: np.ndarray) -> list[np.ndarray]:
+def metric_tight_span(polytrope: np.ndarray, show_full_pd: bool = False) -> list[np.ndarray]:
     n= len(polytrope)
 
     for k in range(n):
@@ -445,9 +445,12 @@ def metric_tight_span(polytrope: np.ndarray) -> list[np.ndarray]:
         # let us compute the boundary of the facet x_i+x_j>= polytrope[i][j]
         # first the boundaries of the form x_i-x_j are the same as polytrope
 
-        # polytrope2 = polytrope.copy()
-        polytrope2 = np.full_like(polytrope, 100000.0)
-        np.fill_diagonal(polytrope2, 0.0)
+        polytrope2=None
+        if show_full_pd:
+          polytrope2 = polytrope.copy()
+        else:
+          polytrope2 = np.full_like(polytrope, 100000.0)
+          np.fill_diagonal(polytrope2, 0.0)
         
         # now we compute the ridges with another facet $x_ii+x_jj$
         # They can be $x_ii + x_jj -x_i - x_j >= d(ii,jj)-d(i,j)$
@@ -532,14 +535,6 @@ def steiner_tree_edges(
 
     return besttree or [], (None if bestlength == inf else bestlength)
 
-def tree_embedding_edges(polytrope: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
-    """
-    Placeholder for tree embedding computation.
-
-    Return a list of edges as (start, end) 3D points.
-    """
-    return []
-
 def nudge_off_diagonal(mat: np.ndarray, eps: float = 0.001) -> np.ndarray:
     """Add a small epsilon to off-diagonal entries to avoid degenerate plots."""
     nudged = mat.copy()
@@ -559,8 +554,8 @@ def plot_trajectories(
     show_out: bool,
     show_in: bool,
     tight_span_overlays: list[tuple[np.ndarray, list[tuple[int, int]]]],
+    pd_overlays: list[tuple[np.ndarray, list[tuple[int, int]]]],
     steiner_edges: list[tuple[np.ndarray, np.ndarray]],
-    tree_embedding_edges: list[tuple[np.ndarray, np.ndarray]],
     tight_span_edge_threshold: float,
     labels_3d: list[tuple[np.ndarray, str]],
 ) -> go.Figure:
@@ -568,7 +563,6 @@ def plot_trajectories(
     in_color = "#F28E2B"  # orange for in-distances
     tight_span_color = "#00C2D1"
     steiner_color = "#59A14F"
-    embedding_color = "#E15759"
     fig = go.Figure()
 
     all_pts: list[np.ndarray] = []
@@ -685,24 +679,32 @@ def plot_trajectories(
             )
             show_legend = False
 
-    if tree_embedding_edges:
+    if pd_overlays:
         show_legend = True
-        for start, end in tree_embedding_edges:
-            seg = np.vstack([to_plot_point(start), to_plot_point(end)])
-            all_pts.append(seg)
-            fig.add_trace(
-                go.Scatter3d(
-                    x=seg[:, 0],
-                    y=seg[:, 1],
-                    z=seg[:, 2],
-                    mode="lines",
-                    name="Tree embedding",
-                    line=dict(color=embedding_color, width=4, dash="dash"),
-                    hoverinfo="skip",
-                    showlegend=show_legend,
+        for poly_vertices, poly_edges in pd_overlays:
+            if poly_vertices is None or poly_edges is None:
+                continue
+            for i, j in poly_edges:
+                pts = poly_vertices[[i, j]]
+                if (
+                    np.linalg.norm(pts[0]) > tight_span_edge_threshold
+                    or np.linalg.norm(pts[1]) > tight_span_edge_threshold
+                ):
+                    continue
+                all_pts.append(pts)
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=pts[:, 0],
+                        y=pts[:, 1],
+                        z=pts[:, 2],
+                        mode="lines",
+                        name="P_d",
+                        line=dict(color=tight_span_color, width=5),
+                        hoverinfo="skip",
+                        showlegend=show_legend,
+                    )
                 )
-            )
-            show_legend = False
+                show_legend = False
 
     # Axes for e0..e3 (centered to sum=0)
     axis_scale = 1.5
@@ -936,8 +938,8 @@ with st.sidebar:
     show_base_polytope = st.checkbox("Show base polytope", value=True)
     show_inner_polytopes = st.checkbox("Show inner polytropes", value=True)
     show_metric_tight_span = st.checkbox("Show metric tight span", value=False)
+    show_pd = st.checkbox("Show P_d", value=False)
     show_steiner_tree = st.checkbox("Show out-Steiner Tree", value=False)
-    show_tree_embedding = st.checkbox("Show tree embedding", value=False)
     tight_span_edge_threshold = 1000.0
 
 steps = 160
@@ -1012,7 +1014,7 @@ if base_geom is not None:
 metric_tight_span_overlays: list[tuple[np.ndarray, list[tuple[int, int]]]] = []
 if show_metric_tight_span:
     try:
-        for poly in metric_tight_span(dist0):
+        for poly in metric_tight_span(dist0, show_full_pd=False):
             geom = polytope_geometry(poly)
             if geom is None:
                 continue
@@ -1021,6 +1023,19 @@ if show_metric_tight_span:
         st.warning("Define metric_tight_span to see the metric tight span.")
     except Exception as exc:  # pragma: no cover - defensive for user edits
         st.warning(f"Metric tight span failed: {exc}")
+
+pd_overlays: list[tuple[np.ndarray, list[tuple[int, int]]]] = []
+if show_pd:
+    try:
+        for poly in metric_tight_span(dist0, show_full_pd=True):
+            geom = polytope_geometry(poly)
+            if geom is None:
+                continue
+            pd_overlays.append((geom["vertices3"], geom["edges"]))
+    except NotImplementedError:
+        st.warning("Define metric_tight_span to see P_d.")
+    except Exception as exc:  # pragma: no cover - defensive for user edits
+        st.warning(f"P_d failed: {exc}")
 
 steiner_edges: list[tuple[np.ndarray, np.ndarray]] = []
 steiner_length: float | None = None
@@ -1031,15 +1046,6 @@ if show_steiner_tree:
         st.warning("Define steiner_tree_edges to see the out-Steiner Tree.")
     except Exception as exc:  # pragma: no cover - defensive for user edits
         st.warning(f"out-Steiner Tree failed: {exc}")
-
-tree_embedding: list[tuple[np.ndarray, np.ndarray]] = []
-if show_tree_embedding:
-    try:
-        tree_embedding = tree_embedding_edges(dist0)
-    except NotImplementedError:
-        st.warning("Define tree_embedding_edges to see the tree embedding.")
-    except Exception as exc:  # pragma: no cover - defensive for user edits
-        st.warning(f"Tree embedding failed: {exc}")
 
 zonotropal_polytope = None
 antizonotropal_polytope = None
@@ -1071,8 +1077,8 @@ with status_col:
         show_out,
         show_in,
         metric_tight_span_overlays,
+        pd_overlays,
         steiner_edges,
-        tree_embedding,
         tight_span_edge_threshold,
         label_points,
     )
