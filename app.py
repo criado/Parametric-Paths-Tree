@@ -400,6 +400,7 @@ def zonotropal_summands(polytrope: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
     antizono= polytrope.copy()
     zono= np.zeros((n,n))
+    length=0
 
     for k in range(n):
       for i in range(n):
@@ -423,8 +424,9 @@ def zonotropal_summands(polytrope: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
               antizono[c][a]-=mu/2
               zono[a][c]+=mu/2
               zono[c][a]+=mu/2
+          length+=mu
     
-    return zono, antizono
+    return zono, antizono, length
 
 
 def metric_tight_span(polytrope: np.ndarray) -> list[np.ndarray]:
@@ -1041,8 +1043,9 @@ if show_tree_embedding:
 
 zonotropal_polytope = None
 antizonotropal_polytope = None
+zonotropal_length: float | None = None
 try:
-    zonotropal_polytope, antizonotropal_polytope = zonotropal_summands(dist0)
+    zonotropal_polytope, antizonotropal_polytope, zonotropal_length = zonotropal_summands(dist0)
 except NotImplementedError:
     st.warning("Define zonotropal_summands to see zonotropal/antizonotropal plots.")
 except Exception as exc:  # pragma: no cover - defensive for user edits
@@ -1090,6 +1093,8 @@ with status_col:
     #st.subheader("Zonotropal summand")
     zono_fig = plot_polytope_only(zono_vertices, zono_edges, axis_dirs, "Zonotropal summand")
     st.plotly_chart(zono_fig, config={"displayModeBar": False}, use_container_width=True)
+    if zonotropal_length is not None:
+        st.caption(f"Zonotropal generator length sum: {zonotropal_length:.4f}")
 
     anti_vertices = anti_geom["vertices3"] if anti_geom else None
     anti_edges = anti_geom["edges"] if anti_geom else None
