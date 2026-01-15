@@ -491,10 +491,7 @@ def steiner_tree_edges(
     for j in range(1,4):
       # i,j are in a side of the partition, 
       # k,l are the other side
-      k,l=None, None
-      if j==1: k,l= 2,3
-      if j==2: k,l= 1,3
-      if j==3: k,l= 1,2
+      k,l= {1:(2,3), 2:(1,3), 3:(1,2)}[j]
 
       # i,j connect to x
       # k,l connect to y
@@ -509,7 +506,6 @@ def steiner_tree_edges(
               +tropdist(x,y)\
               +tropdist(y,polytrope[k])+tropdist(y,polytrope[l])
 
-      # please codex find the pair of points minimizing f(x,y) using nelder mead or something.
       x0 = 0.5 * (polytrope[i] + polytrope[j])
       y0 = 0.5 * (polytrope[k] + polytrope[l])
       def f_flat(v):
@@ -517,8 +513,8 @@ def steiner_tree_edges(
       res = minimize(
         f_flat,
         np.hstack([x0, y0]),
-        method="Nelder-Mead",
-        options={"maxiter": 2000, "xatol": 1e-6, "fatol": 1e-6},
+        method="Powell",
+        options={"maxiter": 2000, "xtol": 1e-6, "ftol": 1e-6},
       )
       x, y = res.x[:n], res.x[n:]
 
